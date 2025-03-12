@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Log Analiz Uygulaması</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      width: 100%;
+      margin: 0 auto;
+    }
+    
+
+.chart-container {
+  flex-grow: 1;
+  width: 100%;
+  height: calc(100vh - 150px); /* Header ve diğer öğeler için alan bırak */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+    .tabs {
+      display: flex;
+      margin-bottom: 10px;
+    }
+    .tab {
+      padding: 10px 15px;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      border-bottom: none;
+      margin-right: 5px;
+    }
+    .tab.active {
+      background-color: #f0f0f0;
+    }
+    .tab-content {
+      display: none;
+      border: 1px solid #ccc;
+      padding: 15px;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    button {
+      padding: 10px 15px;
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+      margin-bottom: 20px;
+    }
+    button:hover {
+      background-color: #45a049;
+    }
+    .status {
+      margin-bottom: 20px;
+      padding: 10px;
+      background-color: #f8f8f8;
+      border-left: 4px solid #4CAF50;
+    }
+    .error {
+      border-left-color: #f44336;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    .title-container {
+      display: flex;
+      align-items: baseline;
+    }
+    .file-name {
+      font-size: 18px;
+      color: #4CAF50;
+      margin-left: 15px;
+    }
+    .date {
+      font-size: 16px;
+      color: #666;
+    }
+    .time-filter {
+      margin-bottom: 15px;
+      padding: 10px;
+      background-color: #f8f8f8;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .time-filter select {
+      padding: 5px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    .time-filter button {
+      margin: 0;
+      padding: 5px 10px;
+    }
+    .time-filter button#memoryResetBtn,
+    .time-filter button#loadResetBtn {
+      background-color: #666;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="title-container">
+        <h1>Log Dosyası Analiz</h1>
+        <span id="fileNameDisplay" class="file-name"></span>
+      </div>
+      <div id="dateDisplay" class="date"></div>
+    </div>
+    
+    <button id="selectFileBtn">Log Dosyası Seç</button>
+    
+    <div id="status" class="status">Lütfen bir log dosyası seçin</div>
+    
+    <div class="tabs">
+      <div class="tab active" data-tab="memory">Memory Kullanım Grafiği</div>
+      <div class="tab" data-tab="load">Load Average Grafiği</div>
+    </div>
+    
+    <div id="memoryTab" class="tab-content active">
+      <div class="time-filter">
+        <label>Saat Aralığı:</label>
+        <select id="memoryStartTime"></select>
+        <span>-</span>
+        <select id="memoryEndTime"></select>
+        <button id="memoryFilterBtn">Filtrele</button>
+        <button id="memoryResetBtn">Sıfırla</button>
+      </div>
+      <div class="chart-container">
+        <canvas id="memoryChart"></canvas>
+      </div>
+    </div>
+    
+    <div id="loadTab" class="tab-content">
+      <div class="time-filter">
+        <label>Saat Aralığı:</label>
+        <select id="loadStartTime"></select>
+        <span>-</span>
+        <select id="loadEndTime"></select>
+        <button id="loadFilterBtn">Filtrele</button>
+        <button id="loadResetBtn">Sıfırla</button>
+      </div>
+      <div class="chart-container">
+        <canvas id="loadChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    // Grafikler için değişkenler
+    let memoryChart = null;
+    let loadChart = null;
+    let originalData = null; // Tüm veriyi saklamak için
+    
+    // Dosya seçme butonu
+    document.getElementById('selectFileBtn').addEventListener('click', () => {
+      ipcRenderer.send('select-file');
+    });
+    
+    // Sekme değiştirme
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        // Aktif sekmeyi değiştir
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        // İçeriği göster/gizle
+        document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+        document.getElementById(tab.dataset.tab + 'Tab').classList.add('active');
+      });
+    });
+    
+    // Dosya işleme sonucu
+    ipcRenderer.on('file-processed', (event, result) => {
+      const statusEl = document.getElementById('status');
+      const dateDisplayEl = document.getElementById('dateDisplay');
+      const fileNameDisplayEl = document.getElementById('fileNameDisplay');
+      
+      if (result.success) {
+        statusEl.textContent = `Excel dosyası oluşturuldu: ${result.excelPath}`;
+        statusEl.classList.remove('error');
+        
+        dateDisplayEl.textContent = `Tarih: ${result.date}`;
+        fileNameDisplayEl.textContent = result.fileName;
+        
+        originalData = result.data; // Orijinal veriyi sakla
+        createCharts(result.data);
+        populateTimeSelects(result.data); // Saat seçeneklerini doldur
+        
+        document.title = `Log Analiz - ${result.fileName}`;
+      } else {
+        statusEl.textContent = `Hata: ${result.error}`;
+        statusEl.classList.add('error');
+      }
+    });
+    
+    // Saat seçeneklerini doldur
+    function populateTimeSelects(data) {
+      const times = data.map(item => item.Saat);
+      const selects = [
+        'memoryStartTime', 'memoryEndTime',
+        'loadStartTime', 'loadEndTime'
+      ];
+      
+      selects.forEach(selectId => {
+        const select = document.getElementById(selectId);
+        select.innerHTML = ''; // Önceki seçenekleri temizle
+        
+        times.forEach(time => {
+          const option = document.createElement('option');
+          option.value = time;
+          option.textContent = time;
+          select.appendChild(option);
+        });
+        
+        // Başlangıç seçenekleri için ilk ve son saatleri seç
+        if (selectId.includes('Start')) {
+          select.value = times[0];
+        } else {
+          select.value = times[times.length - 1];
+        }
+      });
+    }
+
+    // Filtreleme işlevleri
+    function filterData(data, startTime, endTime) {
+      return data.filter(item => {
+        return item.Saat >= startTime && item.Saat <= endTime;
+      });
+    }
+
+    // Memory filtre butonu
+    document.getElementById('memoryFilterBtn').addEventListener('click', () => {
+      const startTime = document.getElementById('memoryStartTime').value;
+      const endTime = document.getElementById('memoryEndTime').value;
+      const filteredData = filterData(originalData, startTime, endTime);
+      updateMemoryChart(filteredData);
+    });
+
+    // Load filtre butonu
+    document.getElementById('loadFilterBtn').addEventListener('click', () => {
+      const startTime = document.getElementById('loadStartTime').value;
+      const endTime = document.getElementById('loadEndTime').value;
+      const filteredData = filterData(originalData, startTime, endTime);
+      updateLoadChart(filteredData);
+    });
+
+    // Sıfırlama butonları
+    document.getElementById('memoryResetBtn').addEventListener('click', () => {
+      updateMemoryChart(originalData);
+    });
+
+    document.getElementById('loadResetBtn').addEventListener('click', () => {
+      updateLoadChart(originalData);
+    });
+
+    // Grafikleri güncelle
+    function updateMemoryChart(data) {
+      const times = data.map(item => item.Saat);
+      const memoryValues = data.map(item => item['Memory Yüzdesi']);
+      
+      memoryChart.data.labels = times;
+      memoryChart.data.datasets[0].data = memoryValues;
+      memoryChart.update();
+    }
+
+    function updateLoadChart(data) {
+      const times = data.map(item => item.Saat);
+      const loadValues = data.map(item => item['Load Average']);
+      
+      loadChart.data.labels = times;
+      loadChart.data.datasets[0].data = loadValues;
+      loadChart.update();
+    }
+
+    // Grafikleri oluştur
+    function createCharts(data) {
+      const times = data.map(item => item.Saat);
+      const memoryValues = data.map(item => item['Memory Yüzdesi']);
+      const loadValues = data.map(item => item['Load Average']);
+      
+      // Önceki grafikleri temizle
+      if (memoryChart) memoryChart.destroy();
+      if (loadChart) loadChart.destroy();
+      
+      // Memory grafiği
+      const memoryCtx = document.getElementById('memoryChart').getContext('2d');
+      memoryChart = new Chart(memoryCtx, {
+        type: 'line',
+        data: {
+          labels: times,
+          datasets: [{
+            label: 'Memory Kullanım Yüzdesi',
+            data: memoryValues,
+            borderColor: 'rgb(75, 192, 192)',
+            tension: 0.1,
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: 'Memory Kullanım Yüzdesi Değişimi'
+            },
+            legend: {
+              position: 'top',
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Yüzde (%)'
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: 'Saat'
+              }
+            }
+          }
+        }
+      });
+      
+      // Load Average grafiği
+      const loadCtx = document.getElementById('loadChart').getContext('2d');
+      loadChart = new Chart(loadCtx, {
+        type: 'line',
+        data: {
+          labels: times,
+          datasets: [{
+            label: 'Load Average',
+            data: loadValues,
+            borderColor: 'rgb(255, 99, 132)',
+            tension: 0.1,
+            fill: false
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            title: {
+              display: true,
+              text: 'Load Average Değişimi'
+            },
+            legend: {
+              position: 'top',
+            }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Yüzde (%)'
+              }
+            },
+            x: {
+              title: {
+                display: true,
+                text: 'Saat'
+              }
+            }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>
